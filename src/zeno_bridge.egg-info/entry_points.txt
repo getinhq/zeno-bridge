@@ -1,0 +1,3 @@
+[console_scripts]
+zeno-bridge = zeno_bridge.cli:main
+zeno-bridge-daemon = zeno_bridge.daemon:main
