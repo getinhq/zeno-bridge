@@ -59,9 +59,90 @@ Example:
 
 ## Registering `zeno://` (OS)
 
-- **macOS:** Ship an app bundle whose `Info.plist` registers `CFBundleURLSchemes` = `zeno` and sets the executable to `zeno-bridge` (or a wrapper that forwards argv). See `packaging/` notes.
+- **macOS:** For local development, use `scripts/install_macos_scheme_handler.sh` to install `~/Applications/ZenoBridgeURLHandler.app` and register `zeno://`. For production, ship a signed/notarized app bundle whose `Info.plist` registers `CFBundleURLSchemes` = `zeno` (see `packaging/SIGNING.md`).
 - **Windows:** Registry `HKEY_CLASSES_ROOT\zeno` URL protocol pointing at `zeno-bridge.exe`.
 - **Linux:** `xdg-mime` / `.desktop` `MimeType=x-scheme-handler/zeno`.
+
+## macOS launch verification sequence
+
+Use this when Safari says the `zeno://` address is invalid.
+
+1) Install dev URL handler app (one-time, local dev):
+
+```bash
+bash scripts/install_macos_scheme_handler.sh
+```
+
+Expected output includes:
+- `Installed URL handler app: ~/Applications/ZenoBridgeURLHandler.app`
+- `Registered zeno:// with bundle id local.zeno.bridge`
+
+2) Start bridge daemon:
+
+```bash
+python3.11 -m zeno_bridge.daemon
+```
+
+3) Verify daemon is reachable:
+
+```bash
+curl -sS "http://127.0.0.1:17373/health"
+```
+
+Expected: `{"ok":true}`
+
+4) Verify API can mint a launch token (replace values as needed):
+
+```bash
+curl -sS -X POST "http://127.0.0.1:8000/api/v1/launch-tokens" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "context": {
+      "version": "1",
+      "intent": "open_asset",
+      "project_id": "00000000-0000-0000-0000-000000000000",
+      "dcc": "blender"
+    }
+  }'
+```
+
+Expected: JSON with a non-empty `token` field.
+
+5) Smoke test the scheme from terminal:
+
+```bash
+open "zeno://launch?token=<paste-token-here>"
+```
+
+Expected: no Safari invalid-address error; request should be routed to Zeno Bridge.
+
+6) Retry from dashboard (`Open in DCC`).
+
+If step (4) fails, fix API/auth first. If step (5) fails, fix OS scheme registration.
+
+### macOS registration checks and maintenance
+
+Check that the handler app exists:
+
+```bash
+ls -la "$HOME/Applications/ZenoBridgeURLHandler.app"
+```
+
+List LaunchServices handlers and confirm `zeno` + `local.zeno.bridge` is present:
+
+```bash
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -dump \
+  | rg -n "zeno|local\\.zeno\\.bridge"
+```
+
+Reinstall handler if registration gets stale:
+
+```bash
+rm -rf "$HOME/Applications/ZenoBridgeURLHandler.app" && bash scripts/install_macos_scheme_handler.sh
+```
+
+The dev handler writes URL-open logs to:
+- `/tmp/zeno-bridge-url-handler.log`
 
 ## Docs
 
