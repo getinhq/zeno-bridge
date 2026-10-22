@@ -37,12 +37,27 @@ Response:
 }
 ```
 
-### `GET /launch?token=<launch_token>[&api_base=<url>]`
+### `POST /launch`
 
 Consumes a one-time launch token and spawns a DCC with:
 
 - `ZENO_API_BASE_URL`
 - `ZENO_LAUNCH_CONTEXT`
+
+Request (must be `Content-Type: application/json`, max 4 KB):
+
+```json
+{ "token": "<launch_token>" }
+```
+
+Rules:
+
+- The `Origin` header must be in the allowlist (`allowed_origins` in config, or
+  `ZENO_BRIDGE_ALLOWED_ORIGINS`; default `http://localhost:5173`, `http://127.0.0.1:5173`).
+  Other origins get `403` and no CORS headers. Requests with no `Origin` (local CLI tools) are allowed.
+- The API base URL is **never** taken from the request. It comes from `ZENO_API_BASE_URL`,
+  then `api_base_url` in config, then `http://127.0.0.1:8000`.
+- `GET /launch` returns `405`.
 
 Success:
 
@@ -59,5 +74,5 @@ Failure:
 ## Web client behavior
 
 1. Mint token via `POST /api/v1/launch-tokens`.
-2. Call daemon `GET /launch?token=...`.
+2. Call daemon `POST /launch` with `{"token": "..."}`.
 3. If daemon unreachable, optional fallback to `zeno://`.

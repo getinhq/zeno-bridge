@@ -11,7 +11,8 @@ Distribute the signed **Zeno Bridge** package from your release channel (MSI/pkg
 
 | Variable | Purpose |
 |----------|---------|
-| `ZENO_API_BASE_URL` | Base URL for zeno-api (used if not in launch context / config). |
+| `ZENO_API_BASE_URL` | Base URL for zeno-api (overrides `api_base_url` in config). |
+| `ZENO_BRIDGE_ALLOWED_ORIGINS` | Comma-separated dashboard origins allowed to call the daemon. |
 | `ZENO_BRIDGE_CONFIG` | Path to `config.json` (optional). |
 | `ZENO_BRIDGE_DEBUG` | Set to enable verbose file logging. |
 | `ZENO_PLUGIN_ROOT` | Optional path to `zeno-plugin` repo for Blender addon bootstrap. |
@@ -32,6 +33,7 @@ Distribute the signed **Zeno Bridge** package from your release channel (MSI/pkg
 ## Troubleshooting: bridge not detected from web
 
 1. Confirm daemon is up: `curl http://127.0.0.1:17373/health` should return `{"ok":true}`.
+   If the browser gets `403 Origin not allowed`, add the dashboard URL to `allowed_origins`.
 2. Confirm **custom URL scheme** is registered only if using fallback mode (open `zeno://launch?token=test`).
 3. Confirm **firewall** allows localhost/HTTPS to zeno-api from the bridge process.
 4. Check **log file** for “No executable for dcc” — add DCC paths in settings/config and executable allowlist if enabled.

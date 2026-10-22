@@ -32,12 +32,17 @@ Example:
 ```json
 {
   "api_base_url": "https://api.zeno.example",
+  "allowed_origins": ["https://zeno.example"],
   "dcc_paths": {
     "blender": "/Applications/Blender.app/Contents/MacOS/Blender"
   },
   "executable_allowlist": [
-    "/Applications/Blender.app/Contents/MacOS/Blender"
+    "/Applications/Blender.app/Contents/MacOS/Blender",
+    "/Applications/DJV.app/Contents/MacOS/djv"
   ],
+  "viewers": {
+    "djv": "/Applications/DJV.app/Contents/MacOS/djv"
+  },
   "dcc_argv": {
     "blender": []
   },
@@ -53,9 +58,20 @@ Example:
 }
 ```
 
-`executable_allowlist` is recommended in production so only known binaries can be launched.
+`api_base_url` is the only API the bridge will exchange tokens with (env `ZENO_API_BASE_URL` overrides it).
+`allowed_origins` lists the dashboard origins allowed to call the daemon (defaults to the Vite dev server).
+The bridge launches binaries from `dcc_paths`. A `dcc_executable_path` sent by the API in the launch context is only used if it appears in `executable_allowlist`.
 `shared_dependencies_path` is the preferred model: bridge installs required runtime deps there and injects it for every DCC launch.
 `pythonpath` and `dcc_pythonpath` are optional overrides for custom environments.
+
+### Open review media in a local viewer
+
+`viewers` maps a name to a media player (DJV, OpenRV, mrViewer…); each must also be in
+`executable_allowlist`. The dashboard's review page then shows **Open in DJV**: the daemon
+(`POST /open-media`) downloads the original upload from `api_base_url` (only signed
+`/api/v1/review-media/…` paths, nothing else) into a cache (`media_cache_dir`, default
+`~/Library/Caches/zeno-bridge/media` on macOS) and opens it. Use this for full-resolution,
+colour-managed inspection; the browser plays the H.264 proxy.
 
 ## Registering `zeno://` (OS)
 

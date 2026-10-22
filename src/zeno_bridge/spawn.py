@@ -14,6 +14,7 @@ from zeno_bridge.config import (
     discover_python_paths_for_dcc,
     discover_zeno_plugin_root,
     load_config,
+    resolve_api_base,
     resolve_dcc_executable,
     resolve_executable_from_launch_context,
 )
@@ -25,7 +26,9 @@ def exchange_token(api_base: str, token: str) -> dict[str, Any]:
     import urllib.error
     import urllib.request
 
-    url = api_base.rstrip("/") + f"/api/v1/launch-tokens/{token}"
+    import urllib.parse
+
+    url = api_base.rstrip("/") + "/api/v1/launch-tokens/" + urllib.parse.quote(token, safe="")
     req = urllib.request.Request(url, method="GET")
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
@@ -51,6 +54,9 @@ def spawn_dcc(
     log = setup_logging()
     config = load_config(config_path)
     dcc = context.get("dcc") or "blender"
+    if not isinstance(dcc, str) or not dcc.isidentifier():
+        log.error("Rejected launch context with invalid dcc id")
+        return 2
     exe = resolve_executable_from_launch_context(context, config)
     if not exe:
         exe = resolve_dcc_executable(dcc, config)
@@ -61,13 +67,9 @@ def spawn_dcc(
         )
         return 2
 
-    api_base = (
-        api_base_override
-        or context.get("api_base_url")
-        or os.environ.get("ZENO_API_BASE_URL")
-        or config.get("api_base_url")
-        or "http://127.0.0.1:8000"
-    )
+    # The DCC talks to the same API the token was exchanged with — never a URL from the
+    # (network-supplied) launch context.
+    api_base = api_base_override or resolve_api_base(config)
 
     env = os.environ.copy()
     env["ZENO_API_BASE_URL"] = api_base
@@ -252,8 +254,12 @@ def _inject_pythonpath_for_dcc(env: dict[str, str], dcc: str, config: dict[str, 
 
 
 def run_from_token(token: str, api_base: str | None = None) -> int:
+    """
+    Exchange ``token`` and spawn the DCC. ``api_base`` is for trusted local callers only
+    (the CLI ``--api-base`` flag); the daemon never passes request input here.
+    """
     log = setup_logging()
-    base = api_base or os.environ.get("ZENO_API_BASE_URL") or "http://127.0.0.1:8000"
+    base = (api_base or resolve_api_base(load_config())).rstrip("/")
     log.info("Exchanging launch token")
     data = exchange_token(base, token)
     ctx = data.get("context")
