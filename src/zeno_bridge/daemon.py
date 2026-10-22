@@ -13,6 +13,7 @@ import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+from zeno_bridge import media
 from zeno_bridge.config import load_config, resolve_allowed_origins
 from zeno_bridge.logging_util import setup_logging
 from zeno_bridge.spawn import run_from_token
@@ -71,29 +72,33 @@ class _Handler(BaseHTTPRequestHandler):
                 },
             )
             return
-        if p.path == "/launch":
-            self._write(405, {"detail": "Use POST /launch with a JSON body {\"token\": \"...\"}"})
+        if p.path == "/viewers":
+            origin = self._origin()
+            if origin is not None and origin not in self._allowed_origins():
+                self._write(403, {"detail": "Origin not allowed"})
+                return
+            viewers = load_config().get("viewers") or {}
+            self._write(200, {"viewers": sorted(viewers) if isinstance(viewers, dict) else []})
+            return
+        if p.path in ("/launch", "/open-media"):
+            self._write(405, {"detail": f"Use POST {p.path} with a JSON body"})
             return
         self._write(404, {"detail": "Not found"})
 
-    def do_POST(self):  # noqa: N802
-        p = urlparse(self.path)
-        if p.path != "/launch":
-            self._write(404, {"detail": "Not found"})
-            return
-
+    def _json_body(self, path: str) -> dict | None:
+        """Shared checks for POST routes; writes the error response and returns None on failure."""
         # Browsers always send Origin on cross-origin POSTs. Requests without one come
         # from local non-browser tools, which can already run programs as this user.
         origin = self._origin()
         if origin is not None and origin not in self._allowed_origins():
-            setup_logging().warning("daemon: rejected /launch from origin %s", origin)
+            setup_logging().warning("daemon: rejected %s from origin %s", path, origin)
             self._write(403, {"detail": "Origin not allowed"})
-            return
+            return None
 
         content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
         if content_type != "application/json":
             self._write(415, {"detail": "Content-Type must be application/json"})
-            return
+            return None
 
         try:
             length = int(self.headers.get("Content-Length") or "0")
@@ -101,14 +106,30 @@ class _Handler(BaseHTTPRequestHandler):
             length = -1
         if length <= 0 or length > _MAX_BODY_BYTES:
             self._write(400, {"detail": "Invalid request body"})
-            return
+            return None
         try:
             body = json.loads(self.rfile.read(length).decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError):
             self._write(400, {"detail": "Invalid JSON body"})
+            return None
+        if not isinstance(body, dict):
+            self._write(400, {"detail": "Invalid JSON body"})
+            return None
+        return body
+
+    def do_POST(self):  # noqa: N802
+        p = urlparse(self.path)
+        if p.path not in ("/launch", "/open-media"):
+            self._write(404, {"detail": "Not found"})
+            return
+        body = self._json_body(p.path)
+        if body is None:
+            return
+        if p.path == "/open-media":
+            self._open_media(body)
             return
 
-        token = body.get("token") if isinstance(body, dict) else None
+        token = body.get("token")
         if not isinstance(token, str) or not token.strip():
             self._write(400, {"detail": "token is required"})
             return
@@ -122,6 +143,20 @@ class _Handler(BaseHTTPRequestHandler):
             self._write(500, {"detail": f"bridge launch failed ({code})"})
             return
         self._write(200, {"ok": True})
+
+    def _open_media(self, body: dict) -> None:
+        path = body.get("path")
+        if not isinstance(path, str) or not path:
+            self._write(400, {"detail": "path is required"})
+            return
+        filename = body.get("filename") if isinstance(body.get("filename"), str) else None
+        viewer = body.get("viewer") if isinstance(body.get("viewer"), str) else None
+        try:
+            result = media.open_media(path, filename, viewer, load_config())
+        except media.MediaError as e:
+            self._write(400, {"detail": str(e)})
+            return
+        self._write(200, {"ok": True, **result})
 
     def log_message(self, fmt, *args):  # noqa: A003
         setup_logging().info("daemon: " + fmt, *args)

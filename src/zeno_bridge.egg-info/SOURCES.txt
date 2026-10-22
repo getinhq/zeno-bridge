@@ -6,6 +6,7 @@ src/zeno_bridge/cli.py
 src/zeno_bridge/config.py
 src/zeno_bridge/daemon.py
 src/zeno_bridge/logging_util.py
+src/zeno_bridge/media.py
 src/zeno_bridge/spawn.py
 src/zeno_bridge.egg-info/PKG-INFO
 src/zeno_bridge.egg-info/SOURCES.txt
@@ -14,3 +15,5 @@ src/zeno_bridge.egg-info/entry_points.txt
 src/zeno_bridge.egg-info/requires.txt
 src/zeno_bridge.egg-info/top_level.txt
 tests/test_cli_parse.py
+tests/test_daemon_security.py
+tests/test_open_media.py
