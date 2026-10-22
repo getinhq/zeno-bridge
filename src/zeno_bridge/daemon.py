@@ -1,34 +1,57 @@
-"""Local HTTP daemon for browser->bridge launch (localhost fallback)."""
+"""Local HTTP daemon for browser->bridge launch (localhost fallback).
+
+Security model: any web page the artist visits can send requests to 127.0.0.1, so
+``/launch`` only accepts ``POST`` with a JSON body from an allowlisted ``Origin``.
+A JSON POST is not a CORS "simple request", so browsers preflight it and refuse to
+send it from origins we do not echo back. The API base URL is never taken from the
+request (see ``config.resolve_api_base``).
+"""
 from __future__ import annotations
 
 import json
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
+from zeno_bridge.config import load_config, resolve_allowed_origins
 from zeno_bridge.logging_util import setup_logging
 from zeno_bridge.spawn import run_from_token
+
+_MAX_BODY_BYTES = 4096
 
 
 class _Handler(BaseHTTPRequestHandler):
     server_version = "ZenoBridgeDaemon/0.1"
+
+    def _allowed_origins(self) -> set[str]:
+        return resolve_allowed_origins(load_config())
+
+    def _origin(self) -> str | None:
+        origin = self.headers.get("Origin")
+        return origin.strip().rstrip("/") if origin else None
+
+    def _cors_headers(self) -> None:
+        origin = self._origin()
+        if origin and origin in self._allowed_origins():
+            self.send_header("Access-Control-Allow-Origin", origin)
+            self.send_header("Vary", "Origin")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            # Chrome Private Network Access preflight for public origin -> localhost.
+            self.send_header("Access-Control-Allow-Private-Network", "true")
 
     def _write(self, status: int, payload: dict) -> None:
         raw = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(raw)))
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self._cors_headers()
         self.end_headers()
         self.wfile.write(raw)
 
     def do_OPTIONS(self):  # noqa: N802
         self.send_response(204)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self._cors_headers()
         self.end_headers()
 
     def do_GET(self):  # noqa: N802
@@ -48,17 +71,50 @@ class _Handler(BaseHTTPRequestHandler):
                 },
             )
             return
+        if p.path == "/launch":
+            self._write(405, {"detail": "Use POST /launch with a JSON body {\"token\": \"...\"}"})
+            return
+        self._write(404, {"detail": "Not found"})
+
+    def do_POST(self):  # noqa: N802
+        p = urlparse(self.path)
         if p.path != "/launch":
             self._write(404, {"detail": "Not found"})
             return
-        q = parse_qs(p.query)
-        token = (q.get("token") or [None])[0]
-        if not token:
-            self._write(400, {"detail": "token query param required"})
+
+        # Browsers always send Origin on cross-origin POSTs. Requests without one come
+        # from local non-browser tools, which can already run programs as this user.
+        origin = self._origin()
+        if origin is not None and origin not in self._allowed_origins():
+            setup_logging().warning("daemon: rejected /launch from origin %s", origin)
+            self._write(403, {"detail": "Origin not allowed"})
             return
-        api_base = (q.get("api_base") or [None])[0] or os.environ.get("ZENO_API_BASE_URL")
+
+        content_type = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if content_type != "application/json":
+            self._write(415, {"detail": "Content-Type must be application/json"})
+            return
+
         try:
-            code = run_from_token(token, api_base=api_base)
+            length = int(self.headers.get("Content-Length") or "0")
+        except ValueError:
+            length = -1
+        if length <= 0 or length > _MAX_BODY_BYTES:
+            self._write(400, {"detail": "Invalid request body"})
+            return
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            self._write(400, {"detail": "Invalid JSON body"})
+            return
+
+        token = body.get("token") if isinstance(body, dict) else None
+        if not isinstance(token, str) or not token.strip():
+            self._write(400, {"detail": "token is required"})
+            return
+
+        try:
+            code = run_from_token(token.strip())
         except Exception as e:  # pragma: no cover - runtime path
             self._write(500, {"detail": str(e)})
             return

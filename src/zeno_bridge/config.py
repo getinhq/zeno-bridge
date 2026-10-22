@@ -47,20 +47,60 @@ def resolve_dcc_executable(dcc: str, config: dict[str, Any]) -> str | None:
 
 def resolve_executable_from_launch_context(context: dict, config: dict[str, Any]) -> str | None:
     """
-    Prefer API-resolved path from ZENO_LAUNCH_CONTEXT (dcc_executable_path) when present and valid.
+    Use the API-resolved path from ZENO_LAUNCH_CONTEXT (dcc_executable_path) only when it
+    is explicitly listed in ``executable_allowlist``.
+
+    The launch context comes from the network, so without an allowlist it is never trusted
+    to choose a binary; the bridge falls back to the local ``dcc_paths`` config instead.
     """
     raw = context.get("dcc_executable_path")
     if not raw or not isinstance(raw, str):
         return None
+    allow = config.get("executable_allowlist") or []
+    if not allow:
+        return None
     exe = Path(raw).expanduser().resolve()
     if not exe.is_file():
         return None
-    allow = config.get("executable_allowlist") or []
-    if allow:
-        allowed = {Path(x).expanduser().resolve() for x in allow}
-        if exe not in allowed:
-            return None
+    allowed = {Path(x).expanduser().resolve() for x in allow}
+    if exe not in allowed:
+        return None
     return str(exe)
+
+
+DEFAULT_API_BASE_URL = "http://127.0.0.1:8000"
+
+# Vite dev server origins used by zeno-dashboard.
+DEFAULT_ALLOWED_ORIGINS = ("http://localhost:5173", "http://127.0.0.1:5173")
+
+
+def resolve_api_base(config: dict[str, Any]) -> str:
+    """
+    API base URL the bridge exchanges tokens against. Comes only from local sources
+    (env, then config) — never from a request — so a web page cannot redirect the
+    exchange to a server it controls.
+    """
+    return (
+        os.environ.get("ZENO_API_BASE_URL", "").strip()
+        or str(config.get("api_base_url") or "").strip()
+        or DEFAULT_API_BASE_URL
+    ).rstrip("/")
+
+
+def resolve_allowed_origins(config: dict[str, Any]) -> set[str]:
+    """
+    Browser origins allowed to call the daemon's /launch endpoint.
+    Priority: env ZENO_BRIDGE_ALLOWED_ORIGINS (comma-separated), config['allowed_origins'],
+    then the dashboard dev defaults.
+    """
+    env_raw = os.environ.get("ZENO_BRIDGE_ALLOWED_ORIGINS", "").strip()
+    if env_raw:
+        values: Any = env_raw.split(",")
+    else:
+        values = config.get("allowed_origins") or list(DEFAULT_ALLOWED_ORIGINS)
+    if not isinstance(values, list):
+        return set(DEFAULT_ALLOWED_ORIGINS)
+    return {str(v).strip().rstrip("/") for v in values if str(v).strip()}
 
 
 def discover_zeno_plugin_root(config: dict[str, Any]) -> str | None:

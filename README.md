@@ -32,6 +32,7 @@ Example:
 ```json
 {
   "api_base_url": "https://api.zeno.example",
+  "allowed_origins": ["https://zeno.example"],
   "dcc_paths": {
     "blender": "/Applications/Blender.app/Contents/MacOS/Blender"
   },
@@ -53,7 +54,9 @@ Example:
 }
 ```
 
-`executable_allowlist` is recommended in production so only known binaries can be launched.
+`api_base_url` is the only API the bridge will exchange tokens with (env `ZENO_API_BASE_URL` overrides it).
+`allowed_origins` lists the dashboard origins allowed to call the daemon (defaults to the Vite dev server).
+The bridge launches binaries from `dcc_paths`. A `dcc_executable_path` sent by the API in the launch context is only used if it appears in `executable_allowlist`.
 `shared_dependencies_path` is the preferred model: bridge installs required runtime deps there and injects it for every DCC launch.
 `pythonpath` and `dcc_pythonpath` are optional overrides for custom environments.
 
